@@ -23,10 +23,12 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AddPhotoAlternate
 import androidx.compose.material.icons.filled.Contacts
 import androidx.compose.material.icons.filled.DeleteSweep
+import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Lock
@@ -34,6 +36,7 @@ import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.UploadFile
 import androidx.compose.material.icons.filled.VideoLibrary
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.Button
@@ -84,6 +87,7 @@ fun VaultHomeScreen(
     viewModel: VaultViewModel,
     onNavigateToPhotos: () -> Unit,
     onNavigateToVideos: () -> Unit,
+    onNavigateToDocuments: () -> Unit,
     onNavigateToContacts: () -> Unit,
     onNavigateToAlbums: () -> Unit,
     onNavigateToFavorites: () -> Unit,
@@ -93,7 +97,9 @@ fun VaultHomeScreen(
     onLockVault: () -> Unit
 ) {
     val allMedia by viewModel.allActiveMedia.collectAsState()
+    val allDocs by viewModel.allActiveDocuments.collectAsState()
     val trashMedia by viewModel.trashMedia.collectAsState()
+    val trashDocs by viewModel.trashDocuments.collectAsState()
     val albums by viewModel.albums.collectAsState()
     val contacts by viewModel.allContacts.collectAsState()
     val storageBreakdown by viewModel.storageBreakdown.collectAsState()
@@ -102,7 +108,9 @@ fun VaultHomeScreen(
 
     val photoCount = allMedia.count { it.mediaType == "PHOTO" }
     val videoCount = allMedia.count { it.mediaType == "VIDEO" }
-    val favoriteCount = allMedia.count { it.isFavorite }
+    val docCount = allDocs.size
+    val favoriteCount = allMedia.count { it.isFavorite } + allDocs.count { it.isFavorite }
+    val totalTrashCount = trashMedia.size + trashDocs.size
 
     // Multi-Photo Picker
     val photoPickerLauncher = rememberLauncherForActivityResult(
@@ -119,6 +127,15 @@ fun VaultHomeScreen(
     ) { uris: List<Uri> ->
         if (uris.isNotEmpty()) {
             viewModel.importMediaUris(uris, isVideo = true)
+        }
+    }
+
+    // Document Picker
+    val docPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenMultipleDocuments()
+    ) { uris: List<Uri> ->
+        if (uris.isNotEmpty()) {
+            viewModel.importDocumentUris(uris, folderName = "Documents")
         }
     }
 
@@ -152,7 +169,7 @@ fun VaultHomeScreen(
                                 color = MaterialTheme.colorScheme.onBackground
                             )
                             Text(
-                                text = "Intelligent Privacy Engine",
+                                text = "Encrypted On-Device Engine",
                                 fontSize = 11.sp,
                                 color = CyanAccent
                             )
@@ -219,11 +236,11 @@ fun VaultHomeScreen(
                 }
             }
 
-            // Quick Import Buttons
+            // Quick Import Buttons (Photos, Videos, Documents)
             item {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Button(
                         onClick = {
@@ -232,23 +249,24 @@ fun VaultHomeScreen(
                             )
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = CyanAccent),
-                        shape = RoundedCornerShape(16.dp),
+                        shape = RoundedCornerShape(14.dp),
                         modifier = Modifier
                             .weight(1f)
-                            .height(50.dp)
+                            .height(48.dp)
                             .testTag("btn_add_photos")
                     ) {
                         Icon(
                             imageVector = Icons.Default.AddPhotoAlternate,
                             contentDescription = "Add Photos",
-                            tint = Color(0xFF0A0C10)
+                            tint = Color(0xFF0A0C10),
+                            modifier = Modifier.size(16.dp)
                         )
-                        Spacer(modifier = Modifier.width(8.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
                         Text(
-                            text = "+ Add Photos",
+                            text = "+ Photos",
                             color = Color(0xFF0A0C10),
                             fontWeight = FontWeight.Bold,
-                            fontSize = 13.sp
+                            fontSize = 12.sp
                         )
                     }
 
@@ -262,31 +280,71 @@ fun VaultHomeScreen(
                             containerColor = MaterialTheme.colorScheme.surfaceVariant,
                             contentColor = MaterialTheme.colorScheme.onSurface
                         ),
-                        shape = RoundedCornerShape(16.dp),
+                        shape = RoundedCornerShape(14.dp),
                         modifier = Modifier
                             .weight(1f)
-                            .height(50.dp)
+                            .height(48.dp)
                             .testTag("btn_add_videos")
                     ) {
                         Icon(
                             imageVector = Icons.Default.Videocam,
                             contentDescription = "Add Videos",
-                            tint = CyanAccent
+                            tint = PurpleAccent,
+                            modifier = Modifier.size(16.dp)
                         )
-                        Spacer(modifier = Modifier.width(8.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
                         Text(
-                            text = "+ Add Videos",
+                            text = "+ Videos",
                             fontWeight = FontWeight.Bold,
-                            fontSize = 13.sp
+                            fontSize = 12.sp
+                        )
+                    }
+
+                    Button(
+                        onClick = {
+                            docPickerLauncher.launch(
+                                arrayOf(
+                                    "*/*",
+                                    "application/pdf",
+                                    "application/msword",
+                                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                                    "application/vnd.ms-excel",
+                                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                    "text/plain",
+                                    "application/zip"
+                                )
+                            )
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                            contentColor = MaterialTheme.colorScheme.onSurface
+                        ),
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(48.dp)
+                            .testTag("btn_add_documents")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.UploadFile,
+                            contentDescription = "Add Files",
+                            tint = Color(0xFFFFD600),
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = "+ Files",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp
                         )
                     }
                 }
             }
 
-            // Main Vault Dashboard Grid (Matching prompt section 4)
+            // Main Vault Dashboard Grid
             item {
                 Text(
-                    text = "Categories",
+                    text = "Vault Categories",
                     fontSize = 16.sp,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onBackground,
@@ -296,14 +354,24 @@ fun VaultHomeScreen(
 
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    // Row 1: Photos & Videos
+                    // Row 1: Documents & Photos
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
                         VaultCategoryCard(
+                            title = "Documents & Files",
+                            count = "$docCount files",
+                            icon = Icons.Default.Description,
+                            iconColor = Color(0xFFFFD600),
+                            onClick = onNavigateToDocuments,
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("card_documents")
+                        )
+                        VaultCategoryCard(
                             title = "Photos",
-                            count = "$photoCount items",
+                            count = "$photoCount photos",
                             icon = Icons.Default.Image,
                             iconColor = CyanAccent,
                             onClick = onNavigateToPhotos,
@@ -311,9 +379,16 @@ fun VaultHomeScreen(
                                 .weight(1f)
                                 .testTag("card_photos")
                         )
+                    }
+
+                    // Row 2: Videos & Contacts
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
                         VaultCategoryCard(
                             title = "Videos",
-                            count = "$videoCount items",
+                            count = "$videoCount videos",
                             icon = Icons.Default.VideoLibrary,
                             iconColor = PurpleAccent,
                             onClick = onNavigateToVideos,
@@ -321,13 +396,6 @@ fun VaultHomeScreen(
                                 .weight(1f)
                                 .testTag("card_videos")
                         )
-                    }
-
-                    // Row 2: Contacts & Albums
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
                         VaultCategoryCard(
                             title = "Private Contacts",
                             count = "${contacts.size} contacts",
@@ -338,8 +406,15 @@ fun VaultHomeScreen(
                                 .weight(1f)
                                 .testTag("card_contacts")
                         )
+                    }
+
+                    // Row 3: Albums & Favorites
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
                         VaultCategoryCard(
-                            title = "Albums",
+                            title = "Media Albums",
                             count = "${albums.size} albums",
                             icon = Icons.Default.Folder,
                             iconColor = OrangeAccent,
@@ -348,26 +423,26 @@ fun VaultHomeScreen(
                                 .weight(1f)
                                 .testTag("card_albums")
                         )
-                    }
-
-                    // Row 3: Favorites & Recently Deleted
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
                         VaultCategoryCard(
                             title = "Favorites",
                             count = "$favoriteCount starred",
                             icon = Icons.Default.Star,
-                            iconColor = Color(0xFFFFD600),
+                            iconColor = Color(0xFFFF5252),
                             onClick = onNavigateToFavorites,
                             modifier = Modifier
                                 .weight(1f)
                                 .testTag("card_favorites")
                         )
+                    }
+
+                    // Row 4: Recently Deleted & Security
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
                         VaultCategoryCard(
                             title = "Recently Deleted",
-                            count = "${trashMedia.size} items",
+                            count = "$totalTrashCount items",
                             icon = Icons.Default.DeleteSweep,
                             iconColor = Color(0xFFFF5252),
                             onClick = onNavigateToTrash,
@@ -375,55 +450,16 @@ fun VaultHomeScreen(
                                 .weight(1f)
                                 .testTag("card_trash")
                         )
-                    }
-
-                    // Row 4: Security & Settings Card
-                    Card(
-                        shape = RoundedCornerShape(18.dp),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { onNavigateToSecurity() }
-                            .testTag("card_security")
-                    ) {
-                        Row(
+                        VaultCategoryCard(
+                            title = "Security & Stats",
+                            count = "Encrypted",
+                            icon = Icons.Default.Security,
+                            iconColor = CyanAccent,
+                            onClick = onNavigateToSecurity,
                             modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(16.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(44.dp)
-                                        .clip(CircleShape)
-                                        .background(CyanAccent.copy(alpha = 0.15f)),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Security,
-                                        contentDescription = "Security",
-                                        tint = CyanAccent,
-                                        modifier = Modifier.size(24.dp)
-                                    )
-                                }
-                                Spacer(modifier = Modifier.width(14.dp))
-                                Column {
-                                    Text(
-                                        text = "Security & Storage",
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 15.sp,
-                                        color = MaterialTheme.colorScheme.onSurface
-                                    )
-                                    Text(
-                                        text = "PIN, Biometrics, Auto-Lock & Storage Stats",
-                                        fontSize = 12.sp,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                            }
-                        }
+                                .weight(1f)
+                                .testTag("card_security")
+                        )
                     }
                 }
             }
@@ -442,7 +478,7 @@ fun VaultHomeScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = "Vault Storage",
+                                text = "Vault Storage Breakdown",
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 14.sp,
                                 color = MaterialTheme.colorScheme.onSurface
@@ -455,12 +491,17 @@ fun VaultHomeScreen(
                             )
                         }
 
-                        Spacer(modifier = Modifier.height(10.dp))
+                        Spacer(modifier = Modifier.height(12.dp))
 
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
+                            StorageStat(
+                                label = "Files/Docs",
+                                size = viewModel.formatBytes(storageBreakdown.documentsBytes),
+                                dotColor = Color(0xFFFFD600)
+                            )
                             StorageStat(
                                 label = "Photos",
                                 size = viewModel.formatBytes(storageBreakdown.photosBytes),
@@ -623,7 +664,7 @@ private fun StorageStat(
             )
             Text(
                 text = size,
-                fontSize = 12.sp,
+                fontSize = 11.sp,
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.onSurface
             )

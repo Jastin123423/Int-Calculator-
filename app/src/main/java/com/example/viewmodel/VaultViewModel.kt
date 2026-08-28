@@ -7,6 +7,8 @@ import androidx.lifecycle.viewModelScope
 import com.example.data.database.AppDatabase
 import com.example.data.database.VaultAlbumEntity
 import com.example.data.database.VaultContactEntity
+import com.example.data.database.VaultDocFolderEntity
+import com.example.data.database.VaultDocumentEntity
 import com.example.data.database.VaultMediaEntity
 import com.example.data.repository.VaultRepository
 import com.example.data.security.VaultSecurityManager
@@ -32,6 +34,36 @@ enum class MediaFilter {
     PHOTOS,
     VIDEOS,
     FAVORITES
+}
+
+enum class DocSortOption(val displayName: String) {
+    NEWEST("Newest First"),
+    OLDEST("Oldest First"),
+    NAME_ASC("Name (A-Z)"),
+    NAME_DESC("Name (Z-A)"),
+    SIZE_DESC("Largest First"),
+    SIZE_ASC("Smallest First"),
+    TYPE("File Type")
+}
+
+enum class DocCategoryFilter(val displayName: String, val categoryKey: String) {
+    ALL("All Files", "ALL"),
+    DOCUMENT("Documents", "DOCUMENT"),
+    PDF("PDFs", "PDF"),
+    SPREADSHEET("Spreadsheets", "SPREADSHEET"),
+    PRESENTATION("Presentations", "PRESENTATION"),
+    TEXT("Text & Code", "TEXT"),
+    ARCHIVE("Archives", "ARCHIVE"),
+    AUDIO("Audio", "AUDIO"),
+    VIDEO("Videos", "VIDEO"),
+    IMAGE("Images", "IMAGE"),
+    APK("APKs", "APK"),
+    OTHER("Other", "OTHER")
+}
+
+enum class DocViewMode {
+    LIST,
+    GRID
 }
 
 class VaultViewModel(application: Application) : AndroidViewModel(application) {
@@ -87,15 +119,35 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList()
     )
 
-    // Filter & Search states
+    // Document flows
+    val allActiveDocuments: StateFlow<List<VaultDocumentEntity>> = repository.getAllActiveDocuments().stateIn(
+        viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList()
+    )
+
+    val trashDocuments: StateFlow<List<VaultDocumentEntity>> = repository.getRecentlyDeletedDocuments().stateIn(
+        viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList()
+    )
+
+    val docFolders: StateFlow<List<VaultDocFolderEntity>> = repository.getAllDocFolders().stateIn(
+        viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList()
+    )
+
+    // Filter & Search states for Media
     val searchQuery = MutableStateFlow("")
     val selectedAlbum = MutableStateFlow<String?>(null)
     val sortOption = MutableStateFlow(SortOption.NEWEST)
     val mediaFilter = MutableStateFlow(MediaFilter.ALL)
-
-    // Selection mode state
     val selectedMediaIds = MutableStateFlow<Set<Long>>(emptySet())
     val isSelectionMode: StateFlow<Boolean> = selectedMediaIds.mapStateFlow { it.isNotEmpty() }
+
+    // Document filter, search, view mode states
+    val docSearchQuery = MutableStateFlow("")
+    val selectedDocFolder = MutableStateFlow<String?>(null)
+    val selectedDocCategory = MutableStateFlow(DocCategoryFilter.ALL)
+    val docSortOption = MutableStateFlow(DocSortOption.NEWEST)
+    val docViewMode = MutableStateFlow(DocViewMode.LIST)
+    val selectedDocIds = MutableStateFlow<Set<Long>>(emptySet())
+    val isDocSelectionMode: StateFlow<Boolean> = selectedDocIds.mapStateFlow { it.isNotEmpty() }
 
     // Loading & Feedback states
     val isImporting = MutableStateFlow(false)
@@ -110,6 +162,14 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
         refreshStorageBreakdown()
         viewModelScope.launch {
             repository.cleanOldTrash()
+            ensureDefaultDocFolders()
+        }
+    }
+
+    private suspend fun ensureDefaultDocFolders() {
+        val defaultFolders = listOf("Documents", "Work", "Personal", "Financial", "Receipts")
+        defaultFolders.forEach { folder ->
+            repository.createDocFolder(folder)
         }
     }
 
@@ -123,12 +183,10 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
     ) { mediaList, query, album, sort, filter ->
         var list = mediaList
 
-        // Filter by album if selected
         if (album != null) {
             list = list.filter { it.albumName == album }
         }
 
-        // Filter by media filter
         list = when (filter) {
             MediaFilter.ALL -> list
             MediaFilter.PHOTOS -> list.filter { it.mediaType == "PHOTO" }
@@ -136,7 +194,6 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
             MediaFilter.FAVORITES -> list.filter { it.isFavorite }
         }
 
-        // Filter by search query
         if (query.isNotBlank()) {
             val q = query.trim().lowercase()
             list = list.filter {
@@ -144,12 +201,56 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
 
-        // Sort
         when (sort) {
             SortOption.NEWEST -> list.sortedByDescending { it.createdTimestamp }
             SortOption.OLDEST -> list.sortedBy { it.createdTimestamp }
             SortOption.NAME -> list.sortedBy { it.fileName.lowercase() }
             SortOption.SIZE -> list.sortedByDescending { it.fileSize }
+        }
+    }.stateIn(
+        viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList()
+    )
+
+    // Filtered & Sorted Document Stream
+    val displayedDocuments: StateFlow<List<VaultDocumentEntity>> = combine(
+        allActiveDocuments,
+        docSearchQuery,
+        selectedDocFolder,
+        selectedDocCategory,
+        docSortOption
+    ) { docs, query, folder, category, sort ->
+        var list = docs
+
+        // Folder filter
+        if (folder != null) {
+            list = list.filter { it.folderName.equals(folder, ignoreCase = true) }
+        }
+
+        // Category filter
+        if (category != DocCategoryFilter.ALL) {
+            list = list.filter { it.category.equals(category.categoryKey, ignoreCase = true) }
+        }
+
+        // Search query
+        if (query.isNotBlank()) {
+            val q = query.trim().lowercase()
+            list = list.filter {
+                it.fileName.lowercase().contains(q) ||
+                        it.fileExtension.lowercase().contains(q) ||
+                        it.folderName.lowercase().contains(q) ||
+                        it.category.lowercase().contains(q)
+            }
+        }
+
+        // Sorting
+        when (sort) {
+            DocSortOption.NEWEST -> list.sortedByDescending { it.createdTimestamp }
+            DocSortOption.OLDEST -> list.sortedBy { it.createdTimestamp }
+            DocSortOption.NAME_ASC -> list.sortedBy { it.fileName.lowercase() }
+            DocSortOption.NAME_DESC -> list.sortedByDescending { it.fileName.lowercase() }
+            DocSortOption.SIZE_DESC -> list.sortedByDescending { it.fileSize }
+            DocSortOption.SIZE_ASC -> list.sortedBy { it.fileSize }
+            DocSortOption.TYPE -> list.sortedWith(compareBy({ it.category }, { it.fileName.lowercase() }))
         }
     }.stateIn(
         viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList()
@@ -176,7 +277,8 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             val photos = allActiveMedia.value.count { it.mediaType == "PHOTO" }
             val videos = allActiveMedia.value.count { it.mediaType == "VIDEO" }
-            _storageBreakdown.value = repository.getStorageBreakdown(photos, videos)
+            val docs = allActiveDocuments.value.size
+            _storageBreakdown.value = repository.getStorageBreakdown(photos, videos, docs)
         }
     }
 
@@ -205,8 +307,11 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
     fun lockVault() {
         securityManager.lockVault()
         clearSelection()
+        clearDocSelection()
         searchQuery.value = ""
+        docSearchQuery.value = ""
         selectedAlbum.value = null
+        selectedDocFolder.value = null
     }
 
     fun checkBackgroundTimeout() {
@@ -218,7 +323,7 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
         securityManager.markUserActivity()
     }
 
-    // --- IMPORT ACTIONS ---
+    // --- IMPORT ACTIONS (MEDIA) ---
     fun importMediaUris(uris: List<Uri>, isVideo: Boolean, albumName: String = "Default") {
         if (uris.isEmpty()) return
         viewModelScope.launch {
@@ -241,6 +346,193 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
             toastMessage.value = "Imported $importedCount item${if (importedCount != 1) "s" else ""} to Vault"
             refreshStorageBreakdown()
         }
+    }
+
+    // --- IMPORT ACTIONS (DOCUMENTS & FILES) ---
+    fun importDocumentUris(
+        uris: List<Uri>,
+        folderName: String = "Documents",
+        onDuplicateFound: ((Uri, String, () -> Unit, () -> Unit) -> Unit)? = null
+    ) {
+        if (uris.isEmpty()) return
+        viewModelScope.launch {
+            isImporting.value = true
+            var importedCount = 0
+            val total = uris.size
+
+            uris.forEachIndexed { index, uri ->
+                importProgress.value = "Importing file ${index + 1} of $total..."
+                val imported = repository.importDocument(uri, folderName)
+                if (imported != null) {
+                    importedCount++
+                }
+            }
+
+            isImporting.value = false
+            importProgress.value = ""
+            toastMessage.value = "Imported $importedCount document${if (importedCount != 1) "s" else ""} to $folderName"
+            refreshStorageBreakdown()
+        }
+    }
+
+    suspend fun getDocumentById(id: Long): VaultDocumentEntity? {
+        return repository.getDocumentById(id)
+    }
+
+    // --- DOCUMENT MANAGEMENT ---
+    fun toggleDocumentFavorite(id: Long, isFav: Boolean) {
+        viewModelScope.launch {
+            repository.toggleDocumentFavorite(id, isFav)
+        }
+    }
+
+    fun deleteDocument(id: Long) {
+        viewModelScope.launch {
+            repository.softDeleteDocument(id)
+            toastMessage.value = "Document moved to Recently Deleted"
+            refreshStorageBreakdown()
+        }
+    }
+
+    fun deleteSelectedDocuments() {
+        val ids = selectedDocIds.value.toList()
+        if (ids.isEmpty()) return
+        viewModelScope.launch {
+            repository.softDeleteDocumentList(ids)
+            clearDocSelection()
+            toastMessage.value = "Moved ${ids.size} files to Recently Deleted"
+            refreshStorageBreakdown()
+        }
+    }
+
+    fun restoreDocument(id: Long) {
+        viewModelScope.launch {
+            repository.restoreDocument(id)
+            toastMessage.value = "Restored document"
+            refreshStorageBreakdown()
+        }
+    }
+
+    fun restoreSelectedDocuments() {
+        val ids = selectedDocIds.value.toList()
+        if (ids.isEmpty()) return
+        viewModelScope.launch {
+            repository.restoreDocumentList(ids)
+            clearDocSelection()
+            toastMessage.value = "Restored ${ids.size} documents"
+            refreshStorageBreakdown()
+        }
+    }
+
+    fun deleteDocumentPermanently(doc: VaultDocumentEntity) {
+        viewModelScope.launch {
+            repository.deleteDocumentPermanently(doc)
+            toastMessage.value = "File permanently deleted"
+            refreshStorageBreakdown()
+        }
+    }
+
+    fun deleteSelectedDocumentsPermanently() {
+        val ids = selectedDocIds.value
+        val itemsToDelete = trashDocuments.value.filter { it.id in ids }
+        if (itemsToDelete.isEmpty()) return
+        viewModelScope.launch {
+            repository.deleteDocumentListPermanently(itemsToDelete)
+            clearDocSelection()
+            toastMessage.value = "Permanently deleted ${itemsToDelete.size} files"
+            refreshStorageBreakdown()
+        }
+    }
+
+    fun emptyDocumentTrash() {
+        val items = trashDocuments.value
+        if (items.isEmpty()) return
+        viewModelScope.launch {
+            repository.emptyDocumentTrash(items)
+            toastMessage.value = "Document trash emptied"
+            refreshStorageBreakdown()
+        }
+    }
+
+    fun moveDocumentToFolder(id: Long, newFolder: String) {
+        viewModelScope.launch {
+            repository.moveDocumentToFolder(id, newFolder)
+            toastMessage.value = "Moved to $newFolder"
+        }
+    }
+
+    fun moveSelectedDocumentsToFolder(newFolder: String) {
+        val ids = selectedDocIds.value.toList()
+        if (ids.isEmpty()) return
+        viewModelScope.launch {
+            repository.moveDocumentListToFolder(ids, newFolder)
+            clearDocSelection()
+            toastMessage.value = "Moved ${ids.size} files to $newFolder"
+        }
+    }
+
+    fun exportDocument(doc: VaultDocumentEntity, destinationUri: Uri) {
+        viewModelScope.launch {
+            val success = repository.exportDocument(doc, destinationUri)
+            if (success) {
+                toastMessage.value = "Exported '${doc.fileName}' to device"
+            } else {
+                toastMessage.value = "Export failed"
+            }
+        }
+    }
+
+    // --- DOC FOLDER MANAGEMENT ---
+    fun createDocFolder(name: String, colorHex: String = "#00E5FF") {
+        viewModelScope.launch {
+            val success = repository.createDocFolder(name, colorHex)
+            if (success) {
+                toastMessage.value = "Folder '$name' created"
+            } else {
+                toastMessage.value = "Folder already exists or invalid"
+            }
+        }
+    }
+
+    fun renameDocFolder(oldName: String, newName: String) {
+        viewModelScope.launch {
+            repository.renameDocFolder(oldName, newName)
+            toastMessage.value = "Folder renamed to '$newName'"
+            if (selectedDocFolder.value == oldName) {
+                selectedDocFolder.value = newName
+            }
+        }
+    }
+
+    fun deleteDocFolder(folderName: String, deleteDocs: Boolean) {
+        val docsInFolder = allActiveDocuments.value.filter { it.folderName == folderName }
+        viewModelScope.launch {
+            repository.deleteDocFolder(folderName, deleteDocs, docsInFolder)
+            if (selectedDocFolder.value == folderName) {
+                selectedDocFolder.value = null
+            }
+            toastMessage.value = "Folder '$folderName' deleted"
+            refreshStorageBreakdown()
+        }
+    }
+
+    // --- DOC SELECTION HELPERS ---
+    fun toggleDocSelection(id: Long) {
+        val current = selectedDocIds.value.toMutableSet()
+        if (current.contains(id)) {
+            current.remove(id)
+        } else {
+            current.add(id)
+        }
+        selectedDocIds.value = current
+    }
+
+    fun selectAllDocs(docList: List<VaultDocumentEntity>) {
+        selectedDocIds.value = docList.map { it.id }.toSet()
+    }
+
+    fun clearDocSelection() {
+        selectedDocIds.value = emptySet()
     }
 
     // --- MEDIA MANAGEMENT ---
@@ -316,6 +608,11 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
             toastMessage.value = "Trash emptied"
             refreshStorageBreakdown()
         }
+    }
+
+    fun emptyAllTrash() {
+        emptyTrash()
+        emptyDocumentTrash()
     }
 
     fun moveMediaToAlbum(id: Long, newAlbum: String) {

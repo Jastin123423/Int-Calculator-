@@ -10,9 +10,11 @@ import androidx.room.RoomDatabase
         HistoryEntity::class,
         VaultMediaEntity::class,
         VaultAlbumEntity::class,
-        VaultContactEntity::class
+        VaultContactEntity::class,
+        VaultDocumentEntity::class,
+        VaultDocFolderEntity::class
     ],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {

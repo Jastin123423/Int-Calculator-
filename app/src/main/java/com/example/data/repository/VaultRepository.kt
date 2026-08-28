@@ -5,6 +5,8 @@ import android.net.Uri
 import com.example.data.database.VaultAlbumEntity
 import com.example.data.database.VaultContactEntity
 import com.example.data.database.VaultDao
+import com.example.data.database.VaultDocFolderEntity
+import com.example.data.database.VaultDocumentEntity
 import com.example.data.database.VaultMediaEntity
 import com.example.data.storage.StorageBreakdown
 import com.example.data.storage.VaultStorageManager
@@ -94,6 +96,88 @@ class VaultRepository(
         vaultDao.emptyTrash()
     }
 
+    // --- DOCUMENTS & FILES ---
+
+    fun getAllActiveDocuments(): Flow<List<VaultDocumentEntity>> = vaultDao.getAllActiveDocuments()
+    fun getDocumentsByFolder(folderName: String): Flow<List<VaultDocumentEntity>> = vaultDao.getDocumentsByFolder(folderName)
+    fun getDocumentsByCategory(category: String): Flow<List<VaultDocumentEntity>> = vaultDao.getDocumentsByCategory(category)
+    fun getFavoriteDocuments(): Flow<List<VaultDocumentEntity>> = vaultDao.getFavoriteDocuments()
+    fun getRecentlyDeletedDocuments(): Flow<List<VaultDocumentEntity>> = vaultDao.getRecentlyDeletedDocuments()
+    fun searchDocuments(query: String): Flow<List<VaultDocumentEntity>> = vaultDao.searchDocuments(query)
+
+    fun getDocumentCount(): Flow<Int> = vaultDao.getDocumentCount()
+    fun getDocTrashCount(): Flow<Int> = vaultDao.getDocTrashCount()
+
+    suspend fun getDocumentById(id: Long): VaultDocumentEntity? = vaultDao.getDocumentById(id)
+
+    suspend fun checkDuplicateDocument(fileName: String, folderName: String, fileSize: Long): VaultDocumentEntity? {
+        return vaultDao.findDuplicateDocument(fileName, folderName, fileSize)
+    }
+
+    suspend fun importDocument(
+        uri: Uri,
+        folderName: String = "Documents",
+        customFileName: String? = null
+    ): VaultDocumentEntity? {
+        val entity = storageManager.importDocument(uri, folderName, customFileName)
+        if (entity != null) {
+            val id = vaultDao.insertDocument(entity)
+            return entity.copy(id = id)
+        }
+        return null
+    }
+
+    suspend fun exportDocument(doc: VaultDocumentEntity, destinationUri: Uri): Boolean {
+        return storageManager.exportDocument(doc, destinationUri)
+    }
+
+    suspend fun softDeleteDocument(id: Long) {
+        vaultDao.softDeleteDocument(id, System.currentTimeMillis())
+    }
+
+    suspend fun softDeleteDocumentList(ids: List<Long>) {
+        vaultDao.softDeleteDocumentList(ids, System.currentTimeMillis())
+    }
+
+    suspend fun restoreDocument(id: Long) {
+        vaultDao.restoreDocument(id)
+    }
+
+    suspend fun restoreDocumentList(ids: List<Long>) {
+        vaultDao.restoreDocumentList(ids)
+    }
+
+    suspend fun toggleDocumentFavorite(id: Long, isFav: Boolean) {
+        vaultDao.setDocumentFavorite(id, isFav)
+    }
+
+    suspend fun moveDocumentToFolder(id: Long, newFolder: String) {
+        vaultDao.moveDocumentToFolder(id, newFolder)
+    }
+
+    suspend fun moveDocumentListToFolder(ids: List<Long>, newFolder: String) {
+        vaultDao.moveDocumentListToFolder(ids, newFolder)
+    }
+
+    suspend fun deleteDocumentPermanently(doc: VaultDocumentEntity) {
+        storageManager.deletePhysicalFile(doc.filePath)
+        vaultDao.deleteDocumentPermanently(doc.id)
+    }
+
+    suspend fun deleteDocumentListPermanently(docs: List<VaultDocumentEntity>) {
+        docs.forEach { doc ->
+            storageManager.deletePhysicalFile(doc.filePath)
+        }
+        vaultDao.deleteDocumentListPermanently(docs.map { it.id })
+    }
+
+    suspend fun emptyDocumentTrash(trashDocs: List<VaultDocumentEntity>) {
+        trashDocs.forEach { doc ->
+            storageManager.deletePhysicalFile(doc.filePath)
+        }
+        vaultDao.emptyDocumentTrash()
+    }
+
     suspend fun cleanOldTrash() {
         val thirtyDaysAgo = System.currentTimeMillis() - (30L * 24 * 60 * 60 * 1000)
         val oldItems = vaultDao.getOldTrashItems(thirtyDaysAgo)
@@ -101,6 +185,39 @@ class VaultRepository(
             storageManager.deletePhysicalFile(media.filePath, media.thumbnailPath)
             vaultDao.deleteMediaPermanently(media.id)
         }
+        val oldDocs = vaultDao.getOldTrashDocuments(thirtyDaysAgo)
+        oldDocs.forEach { doc ->
+            storageManager.deletePhysicalFile(doc.filePath)
+            vaultDao.deleteDocumentPermanently(doc.id)
+        }
+    }
+
+    // --- DOC FOLDERS ---
+    fun getAllDocFolders(): Flow<List<VaultDocFolderEntity>> = vaultDao.getAllDocFolders()
+
+    suspend fun createDocFolder(name: String, colorHex: String = "#00E5FF"): Boolean {
+        val trimmed = name.trim()
+        if (trimmed.isBlank()) return false
+        val entity = VaultDocFolderEntity(name = trimmed, colorHex = colorHex)
+        val id = vaultDao.insertDocFolder(entity)
+        return id > 0
+    }
+
+    suspend fun renameDocFolder(oldName: String, newName: String) {
+        val trimmed = newName.trim()
+        if (trimmed.isBlank() || trimmed == oldName) return
+        vaultDao.deleteDocFolderByName(oldName)
+        vaultDao.insertDocFolder(VaultDocFolderEntity(name = trimmed))
+        vaultDao.renameFolderInDocuments(oldName, trimmed)
+    }
+
+    suspend fun deleteDocFolder(folderName: String, deleteContainedDocs: Boolean, docsInFolder: List<VaultDocumentEntity>) {
+        if (deleteContainedDocs) {
+            deleteDocumentListPermanently(docsInFolder)
+        } else {
+            vaultDao.resetDocFolderToDefault(folderName)
+        }
+        vaultDao.deleteDocFolderByName(folderName)
     }
 
     // --- ALBUMS ---
@@ -157,9 +274,10 @@ class VaultRepository(
     }
 
     // --- STORAGE ---
-    suspend fun getStorageBreakdown(photoCount: Int, videoCount: Int): StorageBreakdown {
-        return storageManager.getStorageBreakdown(photoCount, videoCount)
+    suspend fun getStorageBreakdown(photoCount: Int, videoCount: Int, docCount: Int): StorageBreakdown {
+        return storageManager.getStorageBreakdown(photoCount, videoCount, docCount)
     }
 
     fun formatBytes(bytes: Long): String = storageManager.formatBytes(bytes)
+    fun queryFileName(uri: Uri): String? = storageManager.queryFileName(uri)
 }

@@ -135,4 +135,104 @@ interface VaultDao {
 
     @Query("SELECT COUNT(*) FROM vault_contacts")
     fun getContactCount(): Flow<Int>
+
+    // --- DOCUMENT QUERIES ---
+
+    @Query("SELECT * FROM vault_documents WHERE isDeleted = 0 ORDER BY createdTimestamp DESC")
+    fun getAllActiveDocuments(): Flow<List<VaultDocumentEntity>>
+
+    @Query("SELECT * FROM vault_documents WHERE isDeleted = 0 AND folderName = :folderName ORDER BY createdTimestamp DESC")
+    fun getDocumentsByFolder(folderName: String): Flow<List<VaultDocumentEntity>>
+
+    @Query("SELECT * FROM vault_documents WHERE isDeleted = 0 AND category = :category ORDER BY createdTimestamp DESC")
+    fun getDocumentsByCategory(category: String): Flow<List<VaultDocumentEntity>>
+
+    @Query("SELECT * FROM vault_documents WHERE isDeleted = 0 AND isFavorite = 1 ORDER BY createdTimestamp DESC")
+    fun getFavoriteDocuments(): Flow<List<VaultDocumentEntity>>
+
+    @Query("SELECT * FROM vault_documents WHERE isDeleted = 1 ORDER BY deletedTimestamp DESC")
+    fun getRecentlyDeletedDocuments(): Flow<List<VaultDocumentEntity>>
+
+    @Query("SELECT * FROM vault_documents WHERE isDeleted = 0 AND (fileName LIKE '%' || :query || '%' OR folderName LIKE '%' || :query || '%' OR fileExtension LIKE '%' || :query || '%') ORDER BY createdTimestamp DESC")
+    fun searchDocuments(query: String): Flow<List<VaultDocumentEntity>>
+
+    @Query("SELECT * FROM vault_documents WHERE id = :id LIMIT 1")
+    suspend fun getDocumentById(id: Long): VaultDocumentEntity?
+
+    @Query("SELECT * FROM vault_documents WHERE isDeleted = 0 AND fileName = :fileName AND folderName = :folderName AND fileSize = :fileSize LIMIT 1")
+    suspend fun findDuplicateDocument(fileName: String, folderName: String, fileSize: Long): VaultDocumentEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertDocument(doc: VaultDocumentEntity): Long
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertDocumentList(docs: List<VaultDocumentEntity>): List<Long>
+
+    @Update
+    suspend fun updateDocument(doc: VaultDocumentEntity)
+
+    @Query("UPDATE vault_documents SET isDeleted = 1, deletedTimestamp = :deletedTimestamp WHERE id = :id")
+    suspend fun softDeleteDocument(id: Long, deletedTimestamp: Long = System.currentTimeMillis())
+
+    @Query("UPDATE vault_documents SET isDeleted = 1, deletedTimestamp = :deletedTimestamp WHERE id IN (:ids)")
+    suspend fun softDeleteDocumentList(ids: List<Long>, deletedTimestamp: Long = System.currentTimeMillis())
+
+    @Query("UPDATE vault_documents SET isDeleted = 0, deletedTimestamp = 0 WHERE id = :id")
+    suspend fun restoreDocument(id: Long)
+
+    @Query("UPDATE vault_documents SET isDeleted = 0, deletedTimestamp = 0 WHERE id IN (:ids)")
+    suspend fun restoreDocumentList(ids: List<Long>)
+
+    @Query("UPDATE vault_documents SET isFavorite = :isFavorite WHERE id = :id")
+    suspend fun setDocumentFavorite(id: Long, isFavorite: Boolean)
+
+    @Query("UPDATE vault_documents SET folderName = :newFolder, modifiedTimestamp = :modifiedTime WHERE id = :id")
+    suspend fun moveDocumentToFolder(id: Long, newFolder: String, modifiedTime: Long = System.currentTimeMillis())
+
+    @Query("UPDATE vault_documents SET folderName = :newFolder, modifiedTimestamp = :modifiedTime WHERE id IN (:ids)")
+    suspend fun moveDocumentListToFolder(ids: List<Long>, newFolder: String, modifiedTime: Long = System.currentTimeMillis())
+
+    @Query("DELETE FROM vault_documents WHERE id = :id")
+    suspend fun deleteDocumentPermanently(id: Long)
+
+    @Query("DELETE FROM vault_documents WHERE id IN (:ids)")
+    suspend fun deleteDocumentListPermanently(ids: List<Long>)
+
+    @Query("DELETE FROM vault_documents WHERE isDeleted = 1")
+    suspend fun emptyDocumentTrash()
+
+    @Query("SELECT * FROM vault_documents WHERE isDeleted = 1 AND deletedTimestamp < :threshold")
+    suspend fun getOldTrashDocuments(threshold: Long): List<VaultDocumentEntity>
+
+    @Query("SELECT SUM(fileSize) FROM vault_documents WHERE isDeleted = 0")
+    fun getTotalDocumentStorage(): Flow<Long?>
+
+    @Query("SELECT COUNT(*) FROM vault_documents WHERE isDeleted = 0")
+    fun getDocumentCount(): Flow<Int>
+
+    @Query("SELECT COUNT(*) FROM vault_documents WHERE isDeleted = 1")
+    fun getDocTrashCount(): Flow<Int>
+
+    // --- DOC FOLDER QUERIES ---
+
+    @Query("SELECT * FROM vault_doc_folders ORDER BY createdTimestamp ASC")
+    fun getAllDocFolders(): Flow<List<VaultDocFolderEntity>>
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertDocFolder(folder: VaultDocFolderEntity): Long
+
+    @Update
+    suspend fun updateDocFolder(folder: VaultDocFolderEntity)
+
+    @Query("DELETE FROM vault_doc_folders WHERE name = :name")
+    suspend fun deleteDocFolderByName(name: String)
+
+    @Query("UPDATE vault_documents SET folderName = :newName, modifiedTimestamp = :modifiedTime WHERE folderName = :oldName")
+    suspend fun renameFolderInDocuments(oldName: String, newName: String, modifiedTime: Long = System.currentTimeMillis())
+
+    @Query("UPDATE vault_documents SET folderName = 'Documents', modifiedTimestamp = :modifiedTime WHERE folderName = :folderName")
+    suspend fun resetDocFolderToDefault(folderName: String, modifiedTime: Long = System.currentTimeMillis())
+
+    @Query("SELECT COUNT(*) FROM vault_documents WHERE folderName = :folderName AND isDeleted = 0")
+    fun getDocCountInFolder(folderName: String): Flow<Int>
 }

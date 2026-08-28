@@ -46,6 +46,8 @@ import com.example.ui.tools.unitconverter.UnitConverterScreen
 import com.example.ui.vault.VaultAlbumsScreen
 import com.example.ui.vault.VaultAuthScreen
 import com.example.ui.vault.VaultContactsScreen
+import com.example.ui.vault.VaultDocumentViewerScreen
+import com.example.ui.vault.VaultDocumentsScreen
 import com.example.ui.vault.VaultGalleryScreen
 import com.example.ui.vault.VaultHomeScreen
 import com.example.ui.vault.VaultMediaViewerScreen
@@ -273,6 +275,7 @@ fun CalcProMainApp(
                         viewModel = vaultViewModel,
                         onNavigateToPhotos = { navController.navigate("vault_photos") },
                         onNavigateToVideos = { navController.navigate("vault_videos") },
+                        onNavigateToDocuments = { navController.navigate("vault_documents") },
                         onNavigateToContacts = { navController.navigate("vault_contacts") },
                         onNavigateToAlbums = { navController.navigate("vault_albums") },
                         onNavigateToFavorites = { navController.navigate("vault_favorites") },
@@ -287,6 +290,55 @@ fun CalcProMainApp(
                                 popUpTo("calculator") { inclusive = true }
                             }
                         }
+                    )
+                }
+
+                composable("vault_documents") {
+                    VaultDocumentsScreen(
+                        viewModel = vaultViewModel,
+                        onNavigateBack = { navController.popBackStack() },
+                        onOpenDocument = { docId ->
+                            navController.navigate("vault_doc_viewer/$docId")
+                        },
+                        onLockVault = {
+                            vaultViewModel.lockVault()
+                            navController.navigate("calculator") {
+                                popUpTo("calculator") { inclusive = true }
+                            }
+                        }
+                    )
+                }
+
+                composable(
+                    route = "vault_documents/{folderName}",
+                    arguments = listOf(navArgument("folderName") { type = NavType.StringType })
+                ) { backStackEntry ->
+                    val folderName = backStackEntry.arguments?.getString("folderName")
+                    VaultDocumentsScreen(
+                        viewModel = vaultViewModel,
+                        initialFolder = folderName,
+                        onNavigateBack = { navController.popBackStack() },
+                        onOpenDocument = { docId ->
+                            navController.navigate("vault_doc_viewer/$docId")
+                        },
+                        onLockVault = {
+                            vaultViewModel.lockVault()
+                            navController.navigate("calculator") {
+                                popUpTo("calculator") { inclusive = true }
+                            }
+                        }
+                    )
+                }
+
+                composable(
+                    route = "vault_doc_viewer/{docId}",
+                    arguments = listOf(navArgument("docId") { type = NavType.LongType })
+                ) { backStackEntry ->
+                    val docId = backStackEntry.arguments?.getLong("docId") ?: 0L
+                    VaultDocumentViewerScreen(
+                        viewModel = vaultViewModel,
+                        documentId = docId,
+                        onNavigateBack = { navController.popBackStack() }
                     )
                 }
 
