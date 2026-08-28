@@ -1,0 +1,8 @@
+{
+  "name": "int Calculator ",
+  "description": "Premium, feature-packed offline-first Android calculator with scientific functions, unit conversion, currency rates, financial tools, equation solver, history, and AI math assistant.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
